@@ -1,6 +1,7 @@
 from catboost import CatBoostRegressor
 from lightgbm import LGBMRegressor
 import joblib
+import uuid
 
 
 def train_dump_model(model_name, models_dir, X, y, params=None):
@@ -12,17 +13,19 @@ def train_dump_model(model_name, models_dir, X, y, params=None):
            params: dict
     """
     models = {
-        'CatBoost': CatBoostRegressor, 
+        'CatBoost': CatBoostRegressor,
         'LightGBM': LGBMRegressor
     }
     hyper_str = ''
-    if params == None:
+    if params is None:
         params = {}
     else:
         hyper_str = '_hyperparams'
     model = models[model_name](**params)
     model.fit(X, y)
-    joblib.dump(model, models_dir / f'{model_name.lower()+hyper_str}.pkl')
+    model_id = str(uuid.uuid4()).split('-')[0]
+    joblib.dump(model, models_dir /
+                f'{model_name.lower()+hyper_str+"_"+model_id}.pkl')
 
 
 def get_trained_models(models_dir):
@@ -43,5 +46,6 @@ def make_prediction(model_name, X, models_dir):
         return: float prediction
     """
     model = joblib.load(models_dir / f'{model_name}.pkl')
-    pred = float(model.predict(X))
-    return pred
+    print('####################')
+    print(model)
+    return model.predict(X)

@@ -5,17 +5,24 @@ import models
 import json
 import glob
 from pathlib import Path
-from sklearn.datasets import make_regression
-import numpy as np
+import pandas as pd
 import os
 
 app = Flask(__name__)
 api = Api(app)
 
+
 models_dir = Path('trained_models')
 models_dir.mkdir(parents=True, exist_ok=True)
 
+
 upload_parser = api.parser()
+upload_parser.add_argument(
+    'data',
+    location='files',
+    type=FileStorage,
+    required=True
+)
 upload_parser.add_argument(
     'params',
     location='files',
@@ -42,9 +49,9 @@ class FitModel(Resource):
 
     def __init__(self, api=None, *args, **kwargs):
         super().__init__(api, *args, **kwargs)
-        self.first_start = True
 
     @api.doc(params={
+        'data': 'Загрузите данные для обучения',
         'model': 'Выберите модель',
         'params': 'Выберите .json файл с гиперпараметрами модели (доступно, если не выбрана опция "All")',
     })
@@ -54,17 +61,14 @@ class FitModel(Resource):
     def put(self):
         args = upload_parser.parse_args()
         model_name = args['model']
-        if self.first_start:
-            X, y = make_regression(n_samples=101)
-            sample = np.concatenate((X[-1, :], np.array([y[-1]])))
-            X, y = X[:-1, :], y[:-1]
-            np.savetxt('sample.txt', sample)
-            self.first_start = False
+        train_data_target = pd.read_csv(args['data'], index_col=[0])
+        train_data = train_data_target.drop('target', axis=1)
+        train_target = train_data_target['target']
         if model_name == 'All':
             models.train_dump_model(
-                model_name='CatBoost', models_dir=models_dir, X=X, y=y)
+                model_name='CatBoost', models_dir=models_dir, X=train_data, y=train_target)
             models.train_dump_model(
-                model_name='LightGBM', models_dir=models_dir, X=X, y=y)
+                model_name='LightGBM', models_dir=models_dir, X=train_data, y=train_target)
             return 'All models have been fitted'
         else:
             params = args['params']
@@ -72,7 +76,7 @@ class FitModel(Resource):
                 params = json.load(params)
             try:
                 models.train_dump_model(
-                    model_name=model_name, models_dir=models_dir, X=X, y=y, params=params)
+                    model_name=model_name, models_dir=models_dir, X=train_data, y=train_target, params=params)
             except TypeError:
                 return 'Incorrect parametres'
             return f"Model {model_name} has been fitted"
@@ -158,6 +162,12 @@ class DeleteModels(Resource):
 
 predict_parser = api.parser()
 predict_parser.add_argument(
+    'data',
+    location='files',
+    type=FileStorage,
+    required=True
+)
+predict_parser.add_argument(
     'model_type',
     required=True,
     location='args',
@@ -165,26 +175,31 @@ predict_parser.add_argument(
 )
 
 
-@api.route('/predict', methods=['GET'],
-           doc={'description': 'Сделать предсказание на сгенерированном сэмпле'})
+@api.route('/predict', methods=['PUT', 'POST', 'GET'],
+           doc={'description': 'Сделать предсказание для .csv файла'})
 @api.expect(predict_parser)
 class Predict(Resource):
     """
-    Make a prediction for sample data.
+    Make a prediction for data.
     """
+
+    def __init__(self, api=None, *args, **kwargs):
+        super().__init__(api, *args, **kwargs)
+
     @api.doc(
         params={
+            'data': 'Введите данные',
             'model_type': 'Выберите модель для прогноза'
         }
     )
-    def get(self):
+    def put(self):
         args = predict_parser.parse_args()
         model_to_predict = args['model_type']
-        sample = np.loadtxt('sample.txt')
-        X_sample, y_sample = sample[:-1], sample[-1]
+        test_data_target = pd.read_csv(args['data'], index_col=[0])
+        test_data = test_data_target.drop('target', axis=1)
         prediction = models.make_prediction(
-            model_to_predict, X_sample.reshape(1, -1), models_dir)
-        return f'sample: {y_sample}, prediction: {prediction}'
+            model_to_predict, test_data, models_dir)
+        return 'Prediction: ' + ', '.join([str(x) for x in prediction])
 
 
 if __name__ == '__main__':
